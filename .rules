@@ -1,0 +1,272 @@
+# Project Instructions
+
+- 出力は必ず日本語にしてください。
+- アプリを作成する際には、プロジェクトの要件定義書(.srs)を使用してください。
+- ステップごとに完全なコードを書くこと。怠けてはいけません。
+- Googleのソフトウェアエンジニアとして、核心を突いて、限界まで考え抜いて、最高品質のコードを省略せずに全文出力してください。
+- コードを修正する際は、核心を突いて、限界まで考え抜いて修正してください。
+- フロントエンド・バックエンドでAPI連携するときは、APIのデータを洗い出し、サンプルレスポンス構造を考え、整合性を保ってください。
+- 修正したコードは省略せずに全文で出力してください。
+- あなたのゴールは、私が要求するものは何でも完全に仕上げること。
+- コードを出力するときは、TSDoc形式でドキュメントも書いてください
+- .nextjs15docsを参照し、Next.js 15の仕様に従ってください。
+
+## Overview
+This is an XML parsing tool for XML responses from OpenAI's o1 pro model in ChatGPT.
+
+## Tech Stack
+
+- Frontend: React 19, Next.js 15 App Router, Tailwind, Shadcn , Typescript(The type `any` is not allowed) , zod(Create zod schema and then convert to type), eslint , biome.js
+- Backend(infrastructure) Cloudflare Workers(Use framework Hono), D1(SQLite), KV, R2(Next.js Server Actions to connect to Cloudflare Workers to access D1, KV, R2)
+
+## Project Structure
+
+### General Structure
+
+- `app` - Next.js App Router
+  - `route` - An app route
+    - `_components` - One-off components for the route
+    - `layout.tsx` - Layout for the route
+    - `page.tsx` - Page for the route
+  - `actions` - Server actions for the Next.js app
+- `components` - Shared components
+  - `ui` - UI components
+  - `utilities` - Utility components
+- `lib` - Library code
+  - `hooks` - Custom hooks
+- `prompts` - Prompt files
+- `public` - Static assets
+- `types` - Type definitions
+- `schemas` - Zod Type definitions
+
+## Rules
+
+Follow these rules when building the project.
+
+### General Rules
+
+- Use `@` to import anything from the project unless otherwise specified
+- Use kebab case for all files and folders unless otherwise specified
+
+#### Env Rules
+
+- If you update environment variables, update the `.env.example` file
+- All environment variables should go in `.env.local`
+- Do not expose environment variables to the frontend
+- Use `NEXT_PUBLIC_` prefix for environment variables that need to be accessed from the frontend
+- You may import environment variables in server actions and components by using `process.env.VARIABLE_NAME`
+
+#### Type Rules
+
+Follow these rules when working with types.
+
+- When importing types, use `@/types`
+- Name files like `example-types.ts`
+- All types should go in `types`
+- Make sure to export the types in `types/index.ts`
+- Prefer interfaces over type aliases
+
+An example of a type:
+
+`types/actions-types.ts`
+
+```ts
+export type ActionState<T> = { isSuccess: true; message: string; data: T } | { isSuccess: false; message: string; data?: never };
+```
+
+And exporting it:
+
+`types/index.ts`
+
+```ts
+export * from "./actions-types";
+```
+
+### Frontend Rules
+
+Follow these rules when working on the frontend.
+
+It uses Next.js, Tailwind, Shadcn, and Framer Motion.
+
+#### General Rules
+
+- Use `lucide-react` for icons
+
+#### Components
+
+- Use divs instead of other html tags unless otherwise specified
+- Separate the main parts of a component's html with an extra blank line for visual spacing
+- Use actions, not queries, in the app
+- Always tag a component with either `use server` or `use client` at the top, including layouts and pages
+
+##### Organization
+
+- All components be named using kebab case like `example-component.tsx` unless otherwise specified
+- Put components in `/_components` in the route if one-off components
+- Put components in `/components` from the root if shared components
+
+##### Data Fetching
+
+- Next.js では API ルート (app/api/*) は使用せず、サーバーアクションを利用してデータフェッチを行う。
+- 従来の Next.js API Route (app/api/...) を使わず、サーバーアクションを使ってデータの取得・書き込みを行う
+- データを取得する場合は、サーバーコンポーネント内でサーバーアクションを呼び出し、その結果をクライアントコンポーネントに渡す
+- Use server actions from `/actions` to mutate data.
+
+##### Server Components
+
+- Use `"use server"` at the top of the file.
+- Implement Suspense for asynchronous data fetching to show loading states while data is being fetched.
+- If no asynchronous logic is required for a given server component, you do not need to wrap the component in `<Suspense>`. You can simply return the final UI directly since there is no async boundary needed.
+- If asynchronous fetching is required, you can use a `<Suspense>` boundary and a fallback to indicate a loading state while data is loading.
+
+Example of a server layout:
+
+```tsx
+"use server";
+
+export default async function ExampleServerLayout({ children }: { children: React.ReactNode }) {
+  return children;
+}
+```
+
+Example of a server page (with async logic):
+
+```tsx
+"use server";
+
+import { Suspense } from "react";
+import { SomeAction } from "@/actions/some-actions";
+import SomeComponent from "./_components/some-component";
+import SomeSkeleton from "./_components/some-skeleton";
+
+export default async function ExampleServerPage() {
+  return (
+    <Suspense fallback={<SomeSkeleton className="some-class" />}>
+      <SomeComponentFetcher />
+    </Suspense>
+  );
+}
+
+async function SomeComponentFetcher() {
+  const { data } = await SomeAction();
+  return (
+    <SomeComponent
+      className="some-class"
+      initialData={data || []}
+    />
+  );
+}
+```
+
+Example of a server page (no async logic required):
+
+```tsx
+"use server";
+
+import SomeClientComponent from "./_components/some-client-component";
+
+// In this case, no asynchronous work is being done, so no Suspense or fallback is required.
+export default async function ExampleServerPage() {
+  return <SomeClientComponent initialData={[]} />;
+}
+```
+
+Example of a server component:
+
+```tsx
+"use server";
+
+interface ExampleServerComponentProps {
+  // Your props here
+}
+
+export async function ExampleServerComponent({ props }: ExampleServerComponentProps) {
+  // Your code here
+}
+```
+
+##### Client Components
+
+- Use `"use client"` at the top of the file
+- Client components can safely rely on props passed down from server components, or handle UI interactions without needing <Suspense> if there’s no async logic.
+
+Example of a client page:
+
+```tsx
+"use client";
+
+export default function ExampleClientPage() {
+  // Your code here
+}
+```
+
+Example of a client component:
+
+```tsx
+"use client";
+
+interface ExampleClientComponentProps {
+  initialData: any[];
+}
+
+export default function ExampleClientComponent({ initialData }: ExampleClientComponentProps) {
+  // Client-side logic here
+  return <div>{initialData.length} items</div>;
+}
+```
+
+
+Example of a API Route:
+
+```tsx
+
+export async function GET(
+  request: Request,
+  { params }: { params: Promise<{ slug: string }> }
+) {
+  const slug = (await params).slug // 'a', 'b', or 'c'
+}
+```
+
+Route	Example URL	params
+app/items/[slug]/route.js	/items/a	Promise<{ slug: 'a' }>
+app/items/[slug]/route.js	/items/b	Promise<{ slug: 'b' }>
+app/items/[slug]/route.js	/items/c	Promise<{ slug: 'c' }>
+
+
+Dynamic Routes:
+When you don't know the exact segment names ahead of time and want to create routes from dynamic data, you can use Dynamic Segments that are filled in at request time or prerendered at build time.
+
+Convention
+A Dynamic Segment can be created by wrapping a folder's name in square brackets: [folderName]. For example, [id] or [slug].
+
+Dynamic Segments are passed as the params prop to layout, page, route, and generateMetadata functions.
+
+Example
+For example, a blog could include the following route app/blog/[slug]/page.js where [slug] is the Dynamic Segment for blog posts.
+
+```tsx
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ slug: string }>
+}) {
+  const slug = (await params).slug
+  return <div>My Post: {slug}</div>
+}
+
+```
+
+URL Query Parameters:
+The request object passed to the Route Handler is a NextRequest instance, which has some additional convenience methods, including for more easily handling query parameters.
+
+```tsx
+
+import { type NextRequest } from 'next/server'
+ 
+export function GET(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams
+  const query = searchParams.get('query')
+  // query is "hello" for /api/search?query=hello
+}
+```

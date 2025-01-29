@@ -1,0 +1,1879 @@
+<nextjs 15 docs>
+
+
+Data Fetching and Caching
+This guide will walk you through the basics of data fetching and caching in Next.js, providing practical examples and best practices.
+
+Here's a minimal example of data fetching in Next.js:
+
+app/page.tsx
+TypeScript
+
+TypeScript
+
+export default async function Page() {
+  const data = await fetch('https://api.vercel.app/blog')
+  const posts = await data.json()
+  return (
+    <ul>
+      {posts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+This example demonstrates a basic server-side data fetch using the fetch API in an asynchronous React Server Component.
+
+Reference
+fetch
+React cache
+Next.js unstable_cache
+Examples
+Fetching data on the server with the fetch API
+This component will fetch and display a list of blog posts. The response from fetch is not cached by default.
+
+app/page.tsx
+TypeScript
+
+TypeScript
+
+export default async function Page() {
+  const data = await fetch('https://api.vercel.app/blog')
+  const posts = await data.json()
+  return (
+    <ul>
+      {posts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+If you are not using any Dynamic APIs anywhere else in this route, it will be prerendered during next build to a static page. The data can then be updated using Incremental Static Regeneration.
+
+To prevent the page from prerendering, you can add the following to your file:
+
+
+export const dynamic = 'force-dynamic'
+However, you will commonly use functions like cookies, headers, or reading the incoming searchParams from the page props, which will automatically make the page render dynamically. In this case, you do not need to explicitly use force-dynamic.
+
+Fetching data on the server with an ORM or database
+This component will fetch and display a list of blog posts. The response from the database is not cached by default but could be with additional configuration.
+
+app/page.tsx
+TypeScript
+
+TypeScript
+
+import { db, posts } from '@/lib/db'
+ 
+export default async function Page() {
+  const allPosts = await db.select().from(posts)
+  return (
+    <ul>
+      {allPosts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+If you are not using any Dynamic APIs anywhere else in this route, it will be prerendered during next build to a static page. The data can then be updated using Incremental Static Regeneration.
+
+To prevent the page from prerendering, you can add the following to your file:
+
+
+export const dynamic = 'force-dynamic'
+However, you will commonly use functions like cookies, headers, or reading the incoming searchParams from the page props, which will automatically make the page render dynamically. In this case, you do not need to explicitly use force-dynamic.
+
+Fetching data on the client
+We recommend first attempting to fetch data on the server-side.
+
+However, there are still cases where client-side data fetching makes sense. In these scenarios, you can manually call fetch in a useEffect (not recommended), or lean on popular React libraries in the community (such as SWR or React Query) for client fetching.
+
+app/page.tsx
+TypeScript
+
+TypeScript
+
+'use client'
+ 
+import { useEffect, useState } from 'react'
+ 
+export function Posts() {
+  const [posts, setPosts] = useState(null)
+ 
+  useEffect(() => {
+    async function fetchPosts() {
+      const res = await fetch('https://api.vercel.app/blog')
+      const data = await res.json()
+      setPosts(data)
+    }
+    fetchPosts()
+  }, [])
+ 
+  if (!posts) return <div>Loading...</div>
+ 
+  return (
+    <ul>
+      {posts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+Caching data with an ORM or Database
+You can use the unstable_cache API to cache the response to allow pages to be prerendered when running next build.
+
+app/page.tsx
+TypeScript
+
+TypeScript
+
+import { db, posts } from '@/lib/db'
+import { unstable_cache } from 'next/cache'
+ 
+const getPosts = unstable_cache(
+  async () => {
+    return await db.select().from(posts)
+  },
+  ['posts'],
+  { revalidate: 3600, tags: ['posts'] }
+)
+ 
+export default async function Page() {
+  const allPosts = await getPosts()
+ 
+  return (
+    <ul>
+      {allPosts.map((post) => (
+        <li key={post.id}>{post.title}</li>
+      ))}
+    </ul>
+  )
+}
+This example caches the result of the database query for 1 hour (3600 seconds). It also adds the cache tag posts which can then be invalidated with Incremental Static Regeneration.
+
+Reusing data across multiple functions
+Next.js uses APIs like generateMetadata and generateStaticParams where you will need to use the same data fetched in the page.
+
+If you are using fetch, requests can be memoized by adding cache: 'force-cache'. This means you can safely call the same URL with the same options, and only one request will be made.
+
+Good to know:
+
+In previous versions of Next.js, using fetch would have a default cache value of force-cache. This changed in version 15, to a default of cache: no-store.
+app/blog/[id]/page.tsx
+TypeScript
+
+TypeScript
+
+import { notFound } from 'next/navigation'
+ 
+interface Post {
+  id: string
+  title: string
+  content: string
+}
+ 
+async function getPost(id: string) {
+  const res = await fetch(`https://api.vercel.app/blog/${id}`, {
+    cache: 'force-cache',
+  })
+  const post: Post = await res.json()
+  if (!post) notFound()
+  return post
+}
+ 
+export async function generateStaticParams() {
+  const posts = await fetch('https://api.vercel.app/blog', {
+    cache: 'force-cache',
+  }).then((res) => res.json())
+ 
+  return posts.map((post: Post) => ({
+    id: String(post.id),
+  }))
+}
+ 
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+  const post = await getPost(id)
+ 
+  return {
+    title: post.title,
+  }
+}
+ 
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+  const post = await getPost(id)
+ 
+  return (
+    <article>
+      <h1>{post.title}</h1>
+      <p>{post.content}</p>
+    </article>
+  )
+}
+If you are not using fetch, and instead using an ORM or database directly, you can wrap your data fetch with the React cache function. This will de-duplicate and only make one query.
+
+
+import { db, eq, posts } from '@/lib/db' // Example with Drizzle ORM
+import { notFound } from 'next/navigation'
+import { cache } from 'react'
+ 
+export const getPost = cache(async (id) => {
+  const post = await db.query.posts.findFirst({
+    where: eq(posts.id, Number.parseInt(id)),
+  })
+ 
+  if (!post) notFound()
+  return post
+})
+Revalidating cached data
+Learn more about revalidating cached data with Incremental Static Regeneration.
+
+Patterns
+Parallel and sequential data fetching
+When fetching data inside components, you need to be aware of two data fetching patterns: Parallel and Sequential.
+
+Sequential and Parallel Data Fetching
+Sequential: requests in a component tree are dependent on each other. This can lead to longer loading times.
+Parallel: requests in a route are eagerly initiated and will load data at the same time. This reduces the total time it takes to load data.
+Sequential data fetching
+If you have nested components, and each component fetches its own data, then data fetching will happen sequentially if those data requests are not memoized.
+
+There may be cases where you want this pattern because one fetch depends on the result of the other. For example, the Playlists component will only start fetching data once the Artist component has finished fetching data because Playlists depends on the artistID prop:
+
+app/artist/[username]/page.tsx
+TypeScript
+
+TypeScript
+
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ username: string }>
+}) {
+  const { username } = await params
+  // Get artist information
+  const artist = await getArtist(username)
+ 
+  return (
+    <>
+      <h1>{artist.name}</h1>
+      <Suspense fallback={<div>Loading...</div>}>
+        <Playlists artistID={artist.id} />
+      </Suspense>
+    </>
+  )
+}
+ 
+async function Playlists({ artistID }: { artistID: string }) {
+  // Use the artist ID to fetch playlists
+  const playlists = await getArtistPlaylists(artistID)
+ 
+  return (
+    <ul>
+      {playlists.map((playlist) => (
+        <li key={playlist.id}>{playlist.name}</li>
+      ))}
+    </ul>
+  )
+}
+You can use loading.js (for route segments) or React <Suspense> (for nested components) to show an instant loading state while React streams in the result.
+
+This will prevent the whole route from being blocked by data requests, and the user will be able to interact with the parts of the page that are ready.
+
+Parallel Data Fetching
+By default, layout and page segments are rendered in parallel. This means requests will be initiated in parallel.
+
+However, due to the nature of async/await, an awaited request inside the same segment or component will block any requests below it.
+
+To fetch data in parallel, you can eagerly initiate requests by defining them outside the components that use the data. This saves time by initiating both requests in parallel, however, the user won't see the rendered result until both promises are resolved.
+
+In the example below, the getArtist and getAlbums functions are defined outside the Page component and initiated inside the component using Promise.all:
+
+app/artist/[username]/page.tsx
+TypeScript
+
+TypeScript
+
+import Albums from './albums'
+ 
+async function getArtist(username: string) {
+  const res = await fetch(`https://api.example.com/artist/${username}`)
+  return res.json()
+}
+ 
+async function getAlbums(username: string) {
+  const res = await fetch(`https://api.example.com/artist/${username}/albums`)
+  return res.json()
+}
+ 
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ username: string }>
+}) {
+  const { username } = await params
+  const artistData = getArtist(username)
+  const albumsData = getAlbums(username)
+ 
+  // Initiate both requests in parallel
+  const [artist, albums] = await Promise.all([artistData, albumsData])
+ 
+  return (
+    <>
+      <h1>{artist.name}</h1>
+      <Albums list={albums} />
+    </>
+  )
+}
+In addition, you can add a Suspense Boundary to break up the rendering work and show part of the result as soon as possible.
+
+Preloading Data
+Another way to prevent waterfalls is to use the preload pattern by creating an utility function that you eagerly call above blocking requests. For example, checkIsAvailable() blocks <Item/> from rendering, so you can call preload() before it to eagerly initiate <Item/> data dependencies. By the time <Item/> is rendered, its data has already been fetched.
+
+Note that preload function doesn't block checkIsAvailable() from running.
+
+components/Item.tsx
+TypeScript
+
+TypeScript
+
+import { getItem } from '@/utils/get-item'
+ 
+export const preload = (id: string) => {
+  // void evaluates the given expression and returns undefined
+  // https://developer.mozilla.org/docs/Web/JavaScript/Reference/Operators/void
+  void getItem(id)
+}
+export default async function Item({ id }: { id: string }) {
+  const result = await getItem(id)
+  // ...
+}
+app/item/[id]/page.tsx
+TypeScript
+
+TypeScript
+
+import Item, { preload, checkIsAvailable } from '@/components/Item'
+ 
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const { id } = await params
+  // starting loading item data
+  preload(id)
+  // perform another asynchronous task
+  const isAvailable = await checkIsAvailable()
+ 
+  return isAvailable ? <Item id={id} /> : null
+}
+Good to know: The "preload" function can also have any name as it's a pattern, not an API.
+
+Using React cache and server-only with the Preload Pattern
+You can combine the cache function, the preload pattern, and the server-only package to create a data fetching utility that can be used throughout your app.
+
+utils/get-item.ts
+TypeScript
+
+TypeScript
+
+import { cache } from 'react'
+import 'server-only'
+ 
+export const preload = (id: string) => {
+  void getItem(id)
+}
+ 
+export const getItem = cache(async (id: string) => {
+  // ...
+})
+With this approach, you can eagerly fetch data, cache responses, and guarantee that this data fetching only happens on the server.
+
+The utils/get-item exports can be used by Layouts, Pages, or other components to give them control over when an item's data is fetched.
+
+Good to know:
+
+We recommend using the server-only package to make sure server data fetching functions are never used on the client.
+Preventing sensitive data from being exposed to the client
+We recommend using React's taint APIs, taintObjectReference and taintUniqueValue, to prevent whole object instances or sensitive values from being passed to the client.
+
+To enable tainting in your application, set the Next.js Config experimental.taint option to true:
+
+next.config.js
+
+module.exports = {
+  experimental: {
+    taint: true,
+  },
+}
+Then pass the object or value you want to taint to the experimental_taintObjectReference or experimental_taintUniqueValue functions:
+
+app/utils.ts
+TypeScript
+
+TypeScript
+
+import {
+  experimental_taintObjectReference,
+  experimental_taintUniqueValue,
+} from 'react'
+import { queryDataFromDB } from './api'
+ 
+export async function getUserData() {
+  const data = await queryDataFromDB()
+  experimental_taintObjectReference(
+    'Do not pass the whole user object to the client',
+    data
+  )
+  experimental_taintUniqueValue(
+    "Do not pass the user's address to the client",
+    data,
+    data.address
+  )
+  return data
+}
+app/page.tsx
+TypeScript
+
+TypeScript
+
+import { getUserData } from './data'
+ 
+export async function Page() {
+  const userData = getUserData()
+  return (
+    <ClientComponent
+      user={userData} // this will cause an error because of taintObjectReference
+      address={userData.address} // this will cause an error because of taintUniqueValue
+    />
+  )
+}
+
+
+Server Actions and Mutations
+Server Actions are asynchronous functions that are executed on the server. They can be called in Server and Client Components to handle form submissions and data mutations in Next.js applications.
+
+🎥 Watch: Learn more about mutations with Server Actions → YouTube (10 minutes).
+
+Convention
+A Server Action can be defined with the React "use server" directive. You can place the directive at the top of an async function to mark the function as a Server Action, or at the top of a separate file to mark all exports of that file as Server Actions.
+
+Server Components
+Server Components can use the inline function level or namespace level "use server" directive. To inline a Server Action, add "use server" to the top of the function body:
+
+app/page.tsxnamespace
+TypeScript
+
+TypeScript
+
+export default function Page() {
+  // Server Action
+  async function create() {
+    'use server'
+    // Mutate data
+  }
+ 
+  return '...'
+}
+Client Components
+To call a Server Action in a Client Component, create a new file and add the "use server" directive at the top of it. All exported functions within the file will be marked as Server Actions that can be reused in both Client and Server Components:
+
+app/actions.ts
+TypeScript
+
+TypeScript
+
+'use server'
+ 
+export async function create() {}
+app/button.tsx
+TypeScript
+
+TypeScript
+
+'use client'
+ 
+import { create } from './actions'
+ 
+export function Button() {
+  return <button onClick={() => create()}>Create</button>
+}
+Passing actions as props
+You can also pass a Server Action to a Client Component as a prop:
+
+
+<ClientComponent updateItemAction={updateItem} />
+app/client-component.tsx
+TypeScript
+
+TypeScript
+
+'use client'
+ 
+export default function ClientComponent({
+  updateItemAction,
+}: {
+  updateItemAction: (formData: FormData) => void
+}) {
+  return <form action={updateItemAction}>{/* ... */}</form>
+}
+Usually, the Next.js TypeScript plugin would flag updateItemAction in client-component.tsx since it is a function which generally can't be serialized across client-server boundaries. However, props named action or ending with Action are assumed to receive Server Actions. This is only a heuristic since the TypeScript plugin doesn't actually know if it receives a Server Action or an ordinary function. Runtime type-checking will still ensure you don't accidentally pass a function to a Client Component.
+
+Behavior
+Server actions can be invoked using the action attribute in a <form> element:
+Server Components support progressive enhancement by default, meaning the form will be submitted even if JavaScript hasn't loaded yet or is disabled.
+In Client Components, forms invoking Server Actions will queue submissions if JavaScript isn't loaded yet, prioritizing client hydration.
+After hydration, the browser does not refresh on form submission.
+Server Actions are not limited to <form> and can be invoked from event handlers, useEffect, third-party libraries, and other form elements like <button>.
+Server Actions integrate with the Next.js caching and revalidation architecture. When an action is invoked, Next.js can return both the updated UI and new data in a single server roundtrip.
+Behind the scenes, actions use the POST method, and only this HTTP method can invoke them.
+The arguments and return value of Server Actions must be serializable by React. See the React docs for a list of serializable arguments and values.
+Server Actions are functions. This means they can be reused anywhere in your application.
+Server Actions inherit the runtime from the page or layout they are used on.
+Server Actions inherit the Route Segment Config from the page or layout they are used on, including fields like maxDuration.
+Examples
+Forms
+React extends the HTML <form> element to allow Server Actions to be invoked with the action prop.
+
+When invoked in a form, the action automatically receives the FormData object. You don't need to use React useState to manage fields, instead, you can extract the data using the native FormData methods:
+
+app/invoices/page.tsx
+TypeScript
+
+TypeScript
+
+export default function Page() {
+  async function createInvoice(formData: FormData) {
+    'use server'
+ 
+    const rawFormData = {
+      customerId: formData.get('customerId'),
+      amount: formData.get('amount'),
+      status: formData.get('status'),
+    }
+ 
+    // mutate data
+    // revalidate cache
+  }
+ 
+  return <form action={createInvoice}>...</form>
+}
+Good to know:
+
+Example: Form with Loading & Error States
+When working with forms that have many fields, you may want to consider using the entries() method with JavaScript's Object.fromEntries(). For example: const rawFormData = Object.fromEntries(formData). One thing to note is that the formData will include additional $ACTION_ properties.
+See React <form> documentation to learn more.
+Passing additional arguments
+You can pass additional arguments to a Server Action using the JavaScript bind method.
+
+app/client-component.tsx
+TypeScript
+
+TypeScript
+
+'use client'
+ 
+import { updateUser } from './actions'
+ 
+export function UserProfile({ userId }: { userId: string }) {
+  const updateUserWithId = updateUser.bind(null, userId)
+ 
+  return (
+    <form action={updateUserWithId}>
+      <input type="text" name="name" />
+      <button type="submit">Update User Name</button>
+    </form>
+  )
+}
+The Server Action will receive the userId argument, in addition to the form data:
+
+app/actions.ts
+TypeScript
+
+TypeScript
+
+'use server'
+ 
+export async function updateUser(userId: string, formData: FormData) {}
+Good to know:
+
+An alternative is to pass arguments as hidden input fields in the form (e.g. <input type="hidden" name="userId" value={userId} />). However, the value will be part of the rendered HTML and will not be encoded.
+.bind works in both Server and Client Components. It also supports progressive enhancement.
+Nested form elements
+You can also invoke a Server Action in elements nested inside <form> such as <button>, <input type="submit">, and <input type="image">. These elements accept the formAction prop or event handlers.
+
+This is useful in cases where you want to call multiple server actions within a form. For example, you can create a specific <button> element for saving a post draft in addition to publishing it. See the React <form> docs for more information.
+
+Programmatic form submission
+You can trigger a form submission programmatically using the requestSubmit() method. For example, when the user submits a form using the ⌘ + Enter keyboard shortcut, you can listen for the onKeyDown event:
+
+app/entry.tsx
+TypeScript
+
+TypeScript
+
+'use client'
+ 
+export function Entry() {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      (e.ctrlKey || e.metaKey) &&
+      (e.key === 'Enter' || e.key === 'NumpadEnter')
+    ) {
+      e.preventDefault()
+      e.currentTarget.form?.requestSubmit()
+    }
+  }
+ 
+  return (
+    <div>
+      <textarea name="entry" rows={20} required onKeyDown={handleKeyDown} />
+    </div>
+  )
+}
+This will trigger the submission of the nearest <form> ancestor, which will invoke the Server Action.
+
+Server-side form validation
+You can use the HTML attributes like required and type="email" for basic client-side form validation.
+
+For more advanced server-side validation, you can use a library like zod to validate the form fields before mutating the data:
+
+app/actions.ts
+TypeScript
+
+TypeScript
+
+'use server'
+ 
+import { z } from 'zod'
+ 
+const schema = z.object({
+  email: z.string({
+    invalid_type_error: 'Invalid Email',
+  }),
+})
+ 
+export default async function createUser(formData: FormData) {
+  const validatedFields = schema.safeParse({
+    email: formData.get('email'),
+  })
+ 
+  // Return early if the form data is invalid
+  if (!validatedFields.success) {
+    return {
+      errors: validatedFields.error.flatten().fieldErrors,
+    }
+  }
+ 
+  // Mutate data
+}
+Once the fields have been validated on the server, you can return a serializable object in your action and use the React useActionState hook to show a message to the user.
+
+By passing the action to useActionState, the action's function signature changes to receive a new prevState or initialState parameter as its first argument.
+useActionState is a React hook and therefore must be used in a Client Component.
+app/actions.ts
+TypeScript
+
+TypeScript
+
+'use server'
+ 
+import { redirect } from 'next/navigation'
+ 
+export async function createUser(prevState: any, formData: FormData) {
+  const res = await fetch('https://...')
+  const json = await res.json()
+ 
+  if (!res.ok) {
+    return { message: 'Please enter a valid email' }
+  }
+ 
+  redirect('/dashboard')
+}
+Then, you can pass your action to the useActionState hook and use the returned state to display an error message.
+
+app/ui/signup.tsx
+TypeScript
+
+TypeScript
+
+'use client'
+ 
+import { createUser } from '@/app/actions'
+import { useActionState } from 'react'
+ 
+const initialState = {
+  message: '',
+}
+ 
+export function Signup() {
+  const [state, formAction, pending] = useActionState(createUser, initialState)
+ 
+  return (
+    <form action={formAction}>
+      <label htmlFor="email">Email</label>
+      <input type="text" id="email" name="email" required />
+      {/* ... */}
+      <p aria-live="polite">{state?.message}</p>
+      <button disabled={pending}>Sign up</button>
+    </form>
+  )
+}
+Pending states
+The useActionState hook exposes a pending boolean that can be used to show a loading indicator while the action is being executed.
+
+Alternatively, you can use the useFormStatus hook to show a loading indicator while the action is being executed. When using this hook, you'll need to create a separate component to render the loading indicator. For example, to disable the button when the action is pending:
+
+app/ui/button.tsx
+TypeScript
+
+TypeScript
+
+'use client'
+ 
+import { useFormStatus } from 'react-dom'
+ 
+export function SubmitButton() {
+  const { pending } = useFormStatus()
+ 
+  return (
+    <button disabled={pending} type="submit">
+      Sign Up
+    </button>
+  )
+}
+You can then nest the SubmitButton component inside the form:
+
+app/ui/signup.tsx
+TypeScript
+
+TypeScript
+
+import { createUser } from '@/app/actions'
+import { SubmitButton } from './button'
+ 
+export function Signup() {
+  return (
+    <form action={createUser}>
+      {/* Other form elements */}
+      <SubmitButton />
+    </form>
+  )
+}
+Good to know: In React 19, useFormStatus includes additional keys on the returned object, like data, method, and action. If you are not using React 19, only the pending key is available.
+
+Optimistic updates
+You can use the React useOptimistic hook to optimistically update the UI before the Server Action finishes executing, rather than waiting for the response:
+
+app/page.tsx
+TypeScript
+
+TypeScript
+
+'use client'
+ 
+import { useOptimistic } from 'react'
+import { send } from './actions'
+ 
+type Message = {
+  message: string
+}
+ 
+export function Thread({ messages }: { messages: Message[] }) {
+  const [optimisticMessages, addOptimisticMessage] = useOptimistic<
+    Message[],
+    string
+  >(messages, (state, newMessage) => [...state, { message: newMessage }])
+ 
+  const formAction = async (formData: FormData) => {
+    const message = formData.get('message') as string
+    addOptimisticMessage(message)
+    await send(message)
+  }
+ 
+  return (
+    <div>
+      {optimisticMessages.map((m, i) => (
+        <div key={i}>{m.message}</div>
+      ))}
+      <form action={formAction}>
+        <input type="text" name="message" />
+        <button type="submit">Send</button>
+      </form>
+    </div>
+  )
+}
+Event handlers
+While it's common to use Server Actions within <form> elements, they can also be invoked with event handlers such as onClick. For example, to increment a like count:
+
+app/like-button.tsx
+TypeScript
+
+TypeScript
+
+'use client'
+ 
+import { useState } from 'react'
+import { incrementLike } from './actions'
+ 
+export default function LikeButton({ initialLikes }: { initialLikes: number }) {
+  const [likes, setLikes] = useState(initialLikes)
+ 
+  return (
+    <>
+      <p>Total likes</p>
+      <button
+        onClick () => {
+          const updatedLikes = await incrementLike()
+          setLikes(updatedLikes)
+        }}
+      >
+        Like
+      </button>
+    </>
+  )
+}
+You can also add event handlers to form elements, for example, to save a form field onChange:
+
+app/ui/edit-post.tsx
+
+'use client'
+ 
+import { publishPost, saveDraft } from './actions'
+ 
+export default function EditPost() {
+  return (
+    <form action={publishPost}>
+      <textarea
+        name="content"
+        onChange={async (e) => {
+          await saveDraft(e.target.value)
+        }}
+      />
+      <button type="submit">Publish</button>
+    </form>
+  )
+}
+For cases like this, where multiple events might be fired in quick succession, we recommend debouncing to prevent unnecessary Server Action invocations.
+
+useEffect
+You can use the React useEffect hook to invoke a Server Action when the component mounts or a dependency changes. This is useful for mutations that depend on global events or need to be triggered automatically. For example, onKeyDown for app shortcuts, an intersection observer hook for infinite scrolling, or when the component mounts to update a view count:
+
+app/view-count.tsx
+TypeScript
+
+TypeScript
+
+'use client'
+ 
+import { useEffect, useState } from 'react'
+import { incrementViews } from './actions'
+ 
+export default function ViewCount({ initialViews }: { initialViews: number }) {
+  const [views, setViews] = useState(initialViews)
+ 
+  useEffect(() => {
+    const updateViews = async () => {
+      const updatedViews = await incrementViews()
+      setViews(updatedViews)
+    }
+ 
+    updateViews()
+  }, [])
+ 
+  return <p>Total views</p>
+}
+Remember to considbehavior and caveats of useEffect.
+
+Error Handling
+When an error is thrown, it'll be caught by the nearest error.js or <Suspense> boundary on the client. See Error Handling for more information.
+
+Good to know:
+
+Aside from throwing the error, you can also return an object to be handled by useActionState. See Server-side validation and error handling.
+Revalidating data
+You can revalidate the Next.js Cache inside your Server Actions with the revalidatePath API:
+
+app/actions.ts
+TypeScript
+
+TypeScript
+
+'use server'
+ 
+import { revalidatePath } from 'next/cache'
+ 
+export async function createPost() {
+  try {
+    // ...
+  } catch (error) {
+    // ...
+  }
+ 
+  revalidatePath('/posts')
+}
+Or invalidate a specific data fetch with a cache tag using revalidateTag:
+
+app/actions.ts
+TypeScript
+
+TypeScript
+
+'use server'
+ 
+import { revalidateTag } from 'next/cache'
+ 
+export async function createPost() {
+  try {
+    // ...
+  } catch (error) {
+    // ...
+  }
+ 
+  revalidateTag('posts')
+}
+Redirecting
+If you would like to redirect the user to a different route after the completion of a Server Action, you can use redirect API. redirect needs to be called outside of the try/catch block:
+
+app/actions.ts
+TypeScript
+
+TypeScript
+
+'use server'
+ 
+import { revalidateTag } from 'next/cache'
+import { redirect } from 'next/navigation'
+ 
+export async function createPost(id: string) {
+  try {
+    // ...
+  } catch (error) {
+    // ...
+  }
+ 
+  revalidateTag('posts') // Update cached posts
+  redirect(`/post/${id}`) // Navigate to the new post page
+}
+Cookies
+You can get, set, and delete cookies inside a Server Action using the cookies API:
+
+app/actions.ts
+TypeScript
+
+TypeScript
+
+'use server'
+ 
+import { cookies } from 'next/headers'
+ 
+export async function exampleAction() {
+  const cookieStore = await cookies()
+ 
+  // Get cookie
+  cookieStore.get('name')?.value
+ 
+  // Set cookie
+  cookieStore.set('name', 'Delba')
+ 
+  // Delete cookie
+  cookieStore.delete('name')
+}
+See additional examples for deleting cookies from Server Actions.
+
+Security
+By default, when a Server Action is created and exported, it creates a public HTTP endpoint and should be treated with the same security assumptions and authorization checks. This means, even if a Server Action or utility function is not imported elsewhere in your code, it’s still publicly accessible.
+
+To improve security, Next.js has the following built-in features:
+
+Secure action IDs: Next.js creates encrypted, non-deterministic IDs to allow the client to reference and call the Server Action. These IDs are periodically recalculated between builds for enhanced security.
+Dead code elimination: Unused Server Actions (referenced by their IDs) are removed from client bundle to avoid public access by third-party.
+Good to know:
+
+The IDs are created during compilation and are cached for a maximum of 14 days. They will be regenerated when a new build is initiated or when the build cache is invalidated. This security improvement reduces the risk in cases where an authentication layer is missing. However, you should still treat Server Actions like public HTTP endpoints.
+
+
+// app/actions.js
+'use server'
+ 
+// This action **is** used in our application, so Next.js
+// will create a secure ID to allow the client to reference
+// and call the Server Action.
+export async function updateUserAction(formData) {}
+ 
+// This action **is not** used in our application, so Next.js
+// will automatically remove this code during `next build`
+// and will not create a public endpoint.
+export async function deleteUserAction(formData) {}
+Authentication and authorization
+You should ensure that the user is authorized to perform the action. For example:
+
+app/actions.ts
+
+'use server'
+ 
+import { auth } from './lib'
+ 
+export function addItem() {
+  const { user } = auth()
+  if (!user) {
+    throw new Error('You must be signed in to perform this action')
+  }
+ 
+  // ...
+}
+Closures and encryption
+Defining a Server Action inside a component creates a closure where the action has access to the outer function's scope. For example, the publish action has access to the publishVersion variable:
+
+app/page.tsx
+TypeScript
+
+TypeScript
+
+export default async function Page() {
+  const publishVersion = await getLatestVersion();
+ 
+  async function publish() {
+    "use server";
+    if (publishVersion !== await getLatestVersion()) {
+      throw new Error('The version has changed since pressing publish');
+    }
+    ...
+  }
+ 
+  return (
+    <form>
+      <button formAction={publish}>Publish</button>
+    </form>
+  );
+}
+Closures are useful when you need to capture a snapshot of data (e.g. publishVersion) at the time of rendering so that it can be used later when the action is invoked.
+
+However, for this to happen, the captured variables are sent to the client and back to the server when the action is invoked. To prevent sensitive data from being exposed to the client, Next.js automatically encrypts the closed-over variables. A new private key is generated for each action every time a Next.js application is built. This means actions can only be invoked for a specific build.
+
+Good to know: We don't recommend relying on encryption alone to prevent sensitive values from being exposed on the client. Instead, you should use the React taint APIs to proactively prevent specific data from being sent to the client.
+
+Overwriting encryption keys (advanced)
+When self-hosting your Next.js application across multiple servers, each server instance may end up with a different encryption key, leading to potential inconsistencies.
+
+To mitigate this, you can overwrite the encryption key using the process.env.NEXT_SERVER_ACTIONS_ENCRYPTION_KEY environment variable. Specifying this variable ensures that your encryption keys are persistent across builds, and all server instances use the same key.
+
+This is an advanced use case where consistent encryption behavior across multiple deployments is critical for your application. You should consider standard security practices such key rotation and signing.
+
+Good to know: Next.js applications deployed to Vercel automatically handle this.
+
+Allowed origins (advanced)
+Since Server Actions can be invoked in a <form> element, this opens them up to CSRF attacks.
+
+Behind the scenes, Server Actions use the POST method, and only this HTTP method is allowed to invoke them. This prevents most CSRF vulnerabilities in modern browsers, particularly with SameSite cookies being the default.
+
+As an additional protection, Server Actions in Next.js also compare the Origin header to the Host header (or X-Forwarded-Host). If these don't match, the request will be aborted. In other words, Server Actions can only be invoked on the same host as the page that hosts it.
+
+For large applications that use reverse proxies or multi-layered backend architectures (where the server API differs from the production domain), it's recommended to use the configuration option serverActions.allowedOrigins option to specify a list of safe origins. The option accepts an array of strings.
+
+next.config.js
+
+/** @type {import('next').NextConfig} */
+module.exports = {
+  experimental: {
+    serverActions: {
+      allowedOrigins: ['my-proxy.com', '*.my-proxy.com'],
+    },
+  },
+}
+Learn more about Security and Server Actions.
+
+
+Incremental Static Regeneration (ISR)
+Incremental Static Regeneration (ISR) enables you to:
+
+Update static content without rebuilding the entire site
+Reduce server load by serving prerendered, static pages for most requests
+Ensure proper cache-control headers are automatically added to pages
+Handle large amounts of content pages without long next build times
+Here's a minimal example:
+
+app/blog/[id]/page.tsx
+TypeScript
+
+TypeScript
+
+interface Post {
+  id: string
+  title: string
+  content: string
+}
+ 
+// Next.js will invalidate the cache when a
+// request comes in, at most once every 60 seconds.
+export const revalidate = 60
+ 
+// We'll prerender only the params from `generateStaticParams` at build time.
+// If a request comes in for a path that hasn't been generated,
+// Next.js will server-render the page on-demand.
+export const dynamicParams = true // or false, to 404 on unknown paths
+ 
+export async function generateStaticParams() {
+  const posts: Post[] = await fetch('https://api.vercel.app/blog').then((res) =>
+    res.json()
+  )
+  return posts.map((post) => ({
+    id: String(post.id),
+  }))
+}
+ 
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
+  const id = (await params).id
+  const post: Post = await fetch(`https://api.vercel.app/blog/${id}`).then(
+    (res) => res.json()
+  )
+  return (
+    <main>
+      <h1>{post.title}</h1>
+      <p>{post.content}</p>
+    </main>
+  )
+}
+Here's how this example works:
+
+During next build, all known blog posts are generated (there are 25 in this example)
+All requests made to these pages (e.g. /blog/1) are cached and instantaneous
+After 60 seconds has passed, the next request will still show the cached (stale) page
+The cache is invalidated and a new version of the page begins generating in the background
+Once generated successfully, Next.js will display and cache the updated page
+If /blog/26 is requested, Next.js will generate and cache this page on-demand
+Reference
+Route segment config
+revalidate
+dynamicParams
+Functions
+revalidatePath
+revalidateTag
+Examples
+Time-based revalidation
+This fetches and displays a list of blog posts on /blog. After an hour, the cache for this page is invalidated on the next visit to the page. Then, in the background, a new version of the page is generated with the latest blog posts.
+
+app/blog/page.tsx
+TypeScript
+
+TypeScript
+
+interface Post {
+  id: string
+  title: string
+  content: string
+}
+ 
+export const revalidate = 3600 // invalidate every hour
+ 
+export default async function Page() {
+  const data = await fetch('https://api.vercel.app/blog')
+  const posts: Post[] = await data.json()
+  return (
+    <main>
+      <h1>Blog Posts</h1>
+      <ul>posts.map((post) => (
+          <li key={post.id}>{post.title}</li>
+        ))
+      </ul>
+    </main>
+  )
+}
+We recommend setting a high revalidation time. For instance, 1 hour instead of 1 second. If you need more precision, consider using on-demand revalidation. If you need real-time data, consider switching to dynamic rendering.
+
+On-demand revalidation with revalidatePath
+For a more precise method of revalidation, invalidate pages on-demand with the revalidatePath function.
+
+For example, this Server Action would get called after adding a new post. Regardless of how you retrieve your data in your Server Component, either using fetch or connecting to a database, this will clear the cache for the entire route and allow the Server Component to fetch fresh data.
+
+app/actions.ts
+TypeScript
+
+TypeScript
+
+'use server'
+ 
+import { revalidatePath } from 'next/cache'
+ 
+export async function createPost() {
+  // Invalidate the /posts route in the cache
+  revalidatePath('/posts')
+}
+View a demo and explore the source code.
+
+On-demand revalidation with revalidateTag
+For most use cases, prefer revalidating entire paths. If you need more granular control, you can use the revalidateTag function. For example, you can tag individual fetch calls:
+
+app/blog/page.tsx
+TypeScript
+
+TypeScript
+
+export default async function Page() {
+  const data = await fetch('https://api.vercel.app/blog', {
+    next: { tags: ['posts'] },
+  })
+  const posts = await data.json()
+  // ...
+}
+If you are using an ORM or connecting to a database, you can use unstable_cache:
+
+app/blog/page.tsx
+TypeScript
+
+TypeScript
+
+import { db, posts } from '@/lib/db'
+import { unstable_cache } from 'next/cache'
+ 
+const getCachedPosts = unstable_cache(
+  async () => {
+    return await db.select().from(posts)
+  },
+  ['posts'],
+  { revalidate: 3600, tags: ['posts'] }
+)
+ 
+export default async function Page() {
+  const posts = getCachedPosts()
+  // ...
+}
+You can then use revalidateTag in a Server Actions or Route Handler:
+
+app/actions.ts
+TypeScript
+
+TypeScript
+
+'use server'
+ 
+import { revalidateTag } from 'next/cache'
+ 
+export async function createPost() {
+  // Invalidate all data tagged with 'posts' in the cache
+  revalidateTag('posts')
+}
+Handling uncaught exceptions
+If an error is thrown while attempting to revalidate data, the last successfully generated data will continue to be served from the cache. On the next subsequent request, Next.js will retry revalidating the data. Learn more about error handling.
+
+Customizing the cache location
+Caching and revalidating pages (with Incremental Static Regeneration) use the same shared cache. When deploying to Vercel, the ISR cache is automatically persisted to durable storage.
+
+When self-hosting, the ISR cache is stored to the filesystem (on disk) on your Next.js server. This works automatically when self-hosting using both the Pages and App Router.
+
+You can configure the Next.js cache location if you want to persist cached pages and data to durable storage, or share the cache across multiple containers or instances of your Next.js application. Learn more.
+
+Troubleshooting
+Debugging cached data in local development
+If you are using the fetch API, you can add additional logging to understand which requests are cached or uncached. Learn more about the logging option.
+
+next.config.js
+
+module.exports = {
+  logging: {
+    fetches: {
+      fullUrl: true,
+    },
+  },
+}
+Verifying correct production behavior
+To verify your pages are cached and revalidated correctly in production, you can test locally by running next build and then next start to run the production Next.js server.
+
+This will allow you to test ISR behavior as it would work in a production environment. For further debugging, add the following environment variable to your .env file:
+
+.env
+
+NEXT_PRIVATE_DEBUG_CACHE=1
+This will make the Next.js server console log ISR cache hits and misses. You can inspect the output to see which pages are generated during next build, as well as how pages are updated as paths are accessed on-demand.
+
+Caveats
+ISR is only supported when using the Node.js runtime (default).
+ISR is not supported when creating a Static Export.
+If you have multiple fetch requests in a statically rendered route, and each has a different revalidate frequency, the lowest time will be used for ISR. However, those revalidate frequencies will still be respected by the Data Cache.
+If any of the fetch requests used on a route have a revalidate time of 0, or an explicit no-store, the route will be dynamically rendered.
+Middleware won't be executed for on-demand ISR requests, meaning any path rewrites or logic in Middleware will not be applied. Ensure you are revalidating the exact path. For example, /post/1 instead of a rewritten /post-1.
+
+## Next.js 15 Rendering
+
+Rendering
+Rendering converts the code you write into user interfaces. React and Next.js allow you to create hybrid web applications where parts of your code can be rendered on the server or the client. This section will help you understand the differences between these rendering environments, strategies, and runtimes.
+
+Fundamentals
+To start, it's helpful to be familiar with three foundational web concepts:
+
+The Environments your application code can be executed in: the server and the client.
+The Request-Response Lifecycle that's initiated when a user visits or interacts with your application.
+The Network Boundary that separates server and client code.
+Rendering Environments
+There are two environments where web applications can be rendered: the client and the server.
+
+Client and Server Environments
+The client refers to the browser on a user's device that sends a request to a server for your application code. It then turns the response from the server into a user interface.
+The server refers to the computer in a data center that stores your application code, receives requests from a client, and sends back an appropriate response.
+Historically, developers had to use different languages (e.g. JavaScript, PHP) and frameworks when writing code for the server and the client. With React, developers can use the same language (JavaScript), and the same framework (e.g. Next.js or your framework of choice). This flexibility allows you to seamlessly write code for both environments without context switching.
+
+However, each environment has its own set of capabilities and constraints. Therefore, the code you write for the server and the client is not always the same. There are certain operations (e.g. data fetching or managing user state) that are better suited for one environment over the other.
+
+Understanding these differences is key to effectively using React and Next.js. We'll cover the differences and use cases in more detail on the Server and Client Components pages, for now, let's continue building on our foundation.
+
+Request-Response Lifecycle
+Broadly speaking, all websites follow the same Request-Response Lifecycle:
+
+User Action: The user interacts with a web application. This could be clicking a link, submitting a form, or typing a URL directly into the browser's address bar.
+HTTP Request: The client sends an HTTP request to the server that contains necessary information about what resources are being requested, what method is being used (e.g. GET, POST), and additional data if necessary.
+Server: The server processes the request and responds with the appropriate resources. This process may take a couple of steps like routing, fetching data, etc.
+HTTP Response: After processing the request, the server sends an HTTP response back to the client. This response contains a status code (which tells the client whether the request was successful or not) and requested resources (e.g. HTML, CSS, JavaScript, static assets, etc).
+Client: The client parses the resources to render the user interface.
+User Action: Once the user interface is rendered, the user can interact with it, and the whole process starts again.
+A major part of building a hybrid web application is deciding how to split the work in the lifecycle, and where to place the Network Boundary.
+
+Network Boundary
+In web development, the Network Boundary is a conceptual line that separates the different environments. For example, the client and the server, or the server and the data store.
+
+In React, you choose where to place the client-server network boundary wherever it makes the most sense.
+
+Behind the scenes, the work is split into two parts: the client namespace graph and the server namespace graph. The server namespace graph contains all the components that are rendered on the server, and the client namespace graph contains all components that are rendered on the client.
+
+It may be helpful to think about namespace graphs as a visual representation of how files in your application depend on each other.
+
+You can use the React "use client" convention to define the boundary. There's also a "use server" convention, which tells React to do some computational work on the server.
+
+Building Hybrid Applications
+When working in these environments, it's helpful to think of the flow of the code in your application as unidirectional. In other words, during a response, your application code flows in one direction: from the server to the client.
+
+If you need to access the server from the client, you send a new request to the server rather than re-use the same request. This makes it easier to understand where to render your components and where to place the Network Boundary.
+
+In practice, this model encourages developers to think about what they want to execute on the server first, before sending the result to the client and making the application interactive.
+
+This concept will become clearer when we look at how you can interleave client and server components in the same component tree.
+
+## Server component
+
+Server Components
+React Server Components allow you to write UI that can be rendered and optionally cached on the server. In Next.js, the rendering work is further split by route segments to enable streaming and partial rendering, and there are three different server rendering strategies:
+
+Static Rendering
+Dynamic Rendering
+Streaming
+This page will go through how Server Components work, when you might use them, and the different server rendering strategies.
+
+Benefits of Server Rendering
+There are a couple of benefits to doing the rendering work on the server, including:
+
+Data Fetching: Server Components allow you to move data fetching to the server, closer to your data source. This can improve performance by reducing time it takes to fetch data needed for rendering, and the number of requests the client needs to make.
+Security: Server Components allow you to keep sensitive data and logic on the server, such as tokens and API keys, without the risk of exposing them to the client.
+Caching: By rendering on the server, the result can be cached and reused on subsequent requests and across users. This can improve performance and reduce cost by reducing the amount of rendering and data fetching done on each request.
+Performance: Server Components give you additional tools to optimize performance from the baseline. For example, if you start with an app composed of entirely Client Components, moving non-interactive pieces of your UI to Server Components can reduce the amount of client-side JavaScript needed. This is beneficial for users with slower internet or less powerful devices, as the browser has less client-side JavaScript to download, parse, and execute.
+Initial Page Load and First Contentful Paint (FCP): On the server, we can generate HTML to allow users to view the page immediately, without waiting for the client to download, parse and execute the JavaScript needed to render the page.
+Search Engine Optimization and Social Network Shareability: The rendered HTML can be used by search engine bots to index your pages and social network bots to generate social card previews for your pages.
+Streaming: Server Components allow you to split the rendering work into chunks and stream them to the client as they become ready. This allows the user to see parts of the page earlier without having to wait for the entire page to be rendered on the server.
+Using Server Components in Next.js
+By default, Next.js uses Server Components. This allows you to automatically implement server rendering with no additional configuration, and you can opt into using Client Components when needed, see Client Components.
+
+How are Server Components rendered?
+On the server, Next.js uses React's APIs to orchestrate rendering. The rendering work is split into chunks: by individual route segments and Suspense Boundaries.
+
+Each chunk is rendered in two steps:
+
+React renders Server Components into a special data format called the React Server Component Payload (RSC Payload).
+Next.js uses the RSC Payload and Client Component JavaScript instructions to render HTML on the server.
+Then, on the client:
+
+The HTML is used to immediately show a fast non-interactive preview of the route - this is for the initial page load only.
+The React Server Components Payload is used to reconcile the Client and Server Component trees, and update the DOM.
+The JavaScript instructions are used to hydrate Client Components and make the application interactive.
+What is the React Server Component Payload (RSC)?
+The RSC Payload is a compact binary representation of the rendered React Server Components tree. It's used by React on the client to update the browser's DOM. The RSC Payload contains:
+
+The rendered result of Server Components
+Placeholders for where Client Components should be rendered and references to their JavaScript files
+Any props passed from a Server Component to a Client Component
+Server Rendering Strategies
+There are three subsets of server rendering: Static, Dynamic, and Streaming.
+
+Static Rendering (Default)
+With Static Rendering, routes are rendered at build time, or in the background after data revalidation. The result is cached and can be pushed to a Content Delivery Network (CDN). This optimization allows you to share the result of the rendering work between users and server requests.
+
+Static rendering is useful when a route has data that is not personalized to the user and can be known at build time, such as a static blog post or a product page.
+
+Dynamic Rendering
+With Dynamic Rendering, routes are rendered for each user at request time.
+
+Dynamic rendering is useful when a route has data that is personalized to the user or has information that can only be known at request time, such as cookies or the URL's search params.
+
+Dynamic Routes with Cached Data
+
+In most websites, routes are not fully static or fully dynamic - it's a spectrum. For example, you can have an e-commerce page that uses cached product data that's revalidated at an interval, but also has uncached, personalized customer data.
+
+In Next.js, you can have dynamically rendered routes that have both cached and uncached data. This is because the RSC Payload and data are cached separately. This allows you to opt into dynamic rendering without worrying about the performance impact of fetching all the data at request time.
+
+Learn more about the full-route cache and Data Cache.
+
+Switching to Dynamic Rendering
+During rendering, if a Dynamic API or a fetch option of { cache: 'no-store' } is discovered, Next.js will switch to dynamically rendering the whole route. This table summarizes how Dynamic APIs and data caching affect whether a route is statically or dynamically rendered:
+
+Dynamic APIs	Data	Route
+No	Cached	Statically Rendered
+Yes	Cached	Dynamically Rendered
+No	Not Cached	Dynamically Rendered
+Yes	Not Cached	Dynamically Rendered
+In the table above, for a route to be fully static, all data must be cached. However, you can have a dynamically rendered route that uses both cached and uncached data fetches.
+
+As a developer, you do not need to choose between static and dynamic rendering as Next.js will automatically choose the best rendering strategy for each route based on the features and APIs used. Instead, you choose when to cache or revalidate specific data, and you may choose to stream parts of your UI.
+
+Dynamic APIs
+Dynamic APIs rely on information that can only be known at request time (and not ahead of time during prerendering). Using any of these APIs signals the developer's intention and will opt the whole route into dynamic rendering at the request time. These APIs include:
+
+cookies
+headers
+connection
+draftMode
+searchParams prop
+unstable_noStore
+Streaming
+Diagram showing parallelization of route segments during streaming, showing data fetching, rendering, and hydration of individual chunks.
+Streaming enables you to progressively render UI from the server. Work is split into chunks and streamed to the client as it becomes ready. This allows the user to see parts of the page immediately, before the entire content has finished rendering.
+
+Diagram showing partially rendered page on the client, with loading UI for chunks that are being streamed.
+Streaming is built into the Next.js App Router by default. This helps improve both the initial page loading performance, as well as UI that depends on slower data fetches that would block rendering the whole route. For example, reviews on a product page.
+
+You can start streaming route segments using loading.js and UI components with React Suspense. See the Loading UI and Streaming section for more information.
+
+## Caching in Next.js
+Next.js improves your application's performance and reduces costs by caching rendering work and data requests. This page provides an in-depth look at Next.js caching mechanisms, the APIs you can use to configure them, and how they interact with each other.
+
+Good to know: This page helps you understand how Next.js works under the hood but is not essential knowledge to be productive with Next.js. Most of Next.js' caching heuristics are determined by your API usage and have defaults for the best performance with zero or minimal configuration. If you instead want to jump to examples, start here.
+
+Overview
+Here's a high-level overview of the different caching mechanisms and their purpose:
+
+Mechanism	What	Where	Purpose	Duration
+Request Memoization	Return values of functions	Server	Re-use data in a React Component tree	Per-request lifecycle
+Data Cache	Data	Server	Store data across user requests and deployments	Persistent (can be revalidated)
+Full Route Cache	HTML and RSC payload	Server	Reduce rendering cost and improve performance	Persistent (can be revalidated)
+Router Cache	RSC Payload	Client	Reduce server requests on navigation	User session or time-based
+By default, Next.js will cache as much as possible to improve performance and reduce cost. This means routes are statically rendered and data requests are cached unless you opt out. The diagram below shows the default caching behavior: when a route is statically rendered at build time and when a static route is first visited.
+
+Diagram showing the default caching behavior in Next.js for the four mechanisms, with HIT, MISS and SET at build time and when a route is first visited.
+Caching behavior changes depending on whether the route is statically or dynamically rendered, data is cached or uncached, and whether a request is part of an initial visit or a subsequent navigation. Depending on your use case, you can configure the caching behavior for individual routes and data requests.
+
+Request Memoization
+Next.js extends the fetch API to automatically memoize requests that have the same URL and options. This means you can call a fetch function for the same data in multiple places in a React component tree while only executing it once.
+
+Deduplicated Fetch Requests
+For example, if you need to use the same data across a route (e.g. in a Layout, Page, and multiple components), you do not have to fetch data at the top of the tree, and forward props between components. Instead, you can fetch data in the components that need it without worrying about the performance implications of making multiple requests across the network for the same data.
+
+app/example.tsx
+TypeScript
+
+TypeScript
+
+async function getItem() {
+  // The `fetch` function is automatically memoized and the result
+  // is cached
+  const res = await fetch('https://.../item/1')
+  return res.json()
+}
+ 
+// This function is called twice, but only executed the first time
+const item = await getItem() // cache MISS
+ 
+// The second call could be anywhere in your route
+const item = await getItem() // cache HIT
+How Request Memoization Works
+
+Diagram showing how fetch memoization works during React rendering.
+While rendering a route, the first time a particular request is called, its result will not be in memory and it'll be a cache MISS.
+Therefore, the function will be executed, and the data will be fetched from the external source, and the result will be stored in memory.
+Subsequent function calls of the request in the same render pass will be a cache HIT, and the data will be returned from memory without executing the function.
+Once the route has been rendered and the rendering pass is complete, memory is "reset" and all request memoization entries are cleared.
+Good to know:
+
+Request memoization is a React feature, not a Next.js feature. It's included here to show how it interacts with the other caching mechanisms.
+Memoization only applies to the GET method in fetch requests.
+Memoization only applies to the React Component tree, this means:
+It applies to fetch requests in generateMetadata, generateStaticParams, Layouts, Pages, and other Server Components.
+It doesn't apply to fetch requests in Route Handlers as they are not a part of the React component tree.
+For cases where fetch is not suitable (e.g. some database clients, CMS clients, or GraphQL clients), you can use the React cache function to memoize functions.
+Duration
+The cache lasts the lifetime of a server request until the React component tree has finished rendering.
+
+Revalidating
+Since the memoization is not shared across server requests and only applies during rendering, there is no need to revalidate it.
+
+Opting out
+Memoization only applies to the GET method in fetch requests, other methods, such as POST and DELETE, are not memoized. This default behavior is a React optimization and we do not recommend opting out of it.
+
+To manage individual requests, you can use the signal property from AbortController. However, this will not opt requests out of memoization, rather, abort in-flight requests.
+
+app/example.js
+
+const { signal } = new AbortController()
+fetch(url, { signal })
+Data Cache
+Next.js has a built-in Data Cache that persists the result of data fetches across incoming server requests and deployments. This is possible because Next.js extends the native fetch API to allow each request on the server to set its own persistent caching semantics.
+
+Good to know: In the browser, the cache option of fetch indicates how a request will interact with the browser's HTTP cache, in Next.js, the cache option indicates how a server-side request will interact with the server's Data Cache.
+
+You can use the cache and next.revalidate options of fetch to configure the caching behavior.
+
+How the Data Cache Works
+
+Diagram showing how cached and uncached fetch requests interact with the Data Cache. Cached requests are stored in the Data Cache, and memoized, uncached requests are fetched from the data source, not stored in the Data Cache, and memoized.
+The first time a fetch request with the 'force-cache' option is called during rendering, Next.js checks the Data Cache for a cached response.
+If a cached response is found, it's returned immediately and memoized.
+If a cached response is not found, the request is made to the data source, the result is stored in the Data Cache, and memoized.
+For uncached data (e.g. no cache option defined or using { cache: 'no-store' }), the result is always fetched from the data source, and memoized.
+Whether the data is cached or uncached, the requests are always memoized to avoid making duplicate requests for the same data during a React render pass.
+Differences between the Data Cache and Request Memoization
+
+While both caching mechanisms help improve performance by re-using cached data, the Data Cache is persistent across incoming requests and deployments, whereas memoization only lasts the lifetime of a request.
+
+Duration
+The Data Cache is persistent across incoming requests and deployments unless you revalidate or opt-out.
+
+Revalidating
+Cached data can be revalidated in two ways, with:
+
+Time-based Revalidation: Revalidate data after a certain amount of time has passed and a new request is made. This is useful for data that changes infrequently and freshness is not as critical.
+On-demand Revalidation: Revalidate data based on an event (e.g. form submission). On-demand revalidation can use a tag-based or path-based approach to revalidate groups of data at once. This is useful when you want to ensure the latest data is shown as soon as possible (e.g. when content from your headless CMS is updated).
+Time-based Revalidation
+To revalidate data at a timed interval, you can use the next.revalidate option of fetch to set the cache lifetime of a resource (in seconds).
+
+
+// Revalidate at most every hour
+fetch('https://...', { revalidate: 3600 })
+Alternatively, you can use Route Segment Config options to configure all fetch requests in a segment or for cases where you're not able to use fetch.
+
+How Time-based Revalidation Works
+
+Diagram showing how time-based revalidation works, after the revalidation period, stale data is returned for the first request, then data is revalidated.
+The first time a fetch request with revalidate is called, the data will be fetched from the external data source and stored in the Data Cache.
+Any requests that are called within the specified timeframe (e.g. 60-seconds) will return the cached data.
+After the timeframe, the next request will still return the cached (now stale) data.
+Next.js will trigger a revalidation of the data in the background.
+Once the data is fetched successfully, Next.js will update the Data Cache with the fresh data.
+If the background revalidation fails, the previous data will be kept unaltered.
+This is similar to stale-while-revalidate behavior.
+
+On-demand Revalidation
+Data can be revalidated on-demand by path (revalidatePath) or by cache tag (revalidateTag).
+
+How On-Demand Revalidation Works
+
+Diagram showing how on-demand revalidation works, the Data Cache is updated with fresh data after a revalidation request.
+The first time a fetch request is called, the data will be fetched from the external data source and stored in the Data Cache.
+When an on-demand revalidation is triggered, the appropriate cache entries will be purged from the cache.
+This is different from time-based revalidation, which keeps the stale data in the cache until the fresh data is fetched.
+The next time a request is made, it will be a cache MISS again, and the data will be fetched from the external data source and stored in the Data Cache.
+Opting out
+If you do not want to cache the response from fetch, you can do the following:
+
+
+const data = await fetch('https://api.vercel.app/blog', { cache: 'no-store' })
+Full Route Cache
+Related terms:
+
+You may see the terms Automatic Static Optimization, Static Site Generation, or Static Rendering being used interchangeably to refer to the process of rendering and caching routes of your application at build time.
+
+Next.js automatically renders and caches routes at build time. This is an optimization that allows you to serve the cached route instead of rendering on the server for every request, resulting in faster page loads.
+
+To understand how the Full Route Cache works, it's helpful to look at how React handles rendering, and how Next.js caches the result:
+
+1. React Rendering on the Server
+On the server, Next.js uses React's APIs to orchestrate rendering. The rendering work is split into chunks: by individual routes segments and Suspense boundaries.
+
+Each chunk is rendered in two steps:
+
+React renders Server Components into a special data format, optimized for streaming, called the React Server Component Payload.
+Next.js uses the React Server Component Payload and Client Component JavaScript instructions to render HTML on the server.
+This means we don't have to wait for everything to render before caching the work or sending a response. Instead, we can stream a response as work is completed.
+
+What is the React Server Component Payload?
+
+The React Server Component Payload is a compact binary representation of the rendered React Server Components tree. It's used by React on the client to update the browser's DOM. The React Server Component Payload contains:
+
+The rendered result of Server Components
+Placeholders for where Client Components should be rendered and references to their JavaScript files
+Any props passed from a Server Component to a Client Component
+To learn more, see the Server Components documentation.
+
+2. Next.js Caching on the Server (Full Route Cache)
+Default behavior of the Full Route Cache, showing how the React Server Component Payload and HTML are cached on the server for statically rendered routes.
+The default behavior of Next.js is to cache the rendered result (React Server Component Payload and HTML) of a route on the server. This applies to statically rendered routes at build time, or during revalidation.
+
+3. React Hydration and Reconciliation on the Client
+At request time, on the client:
+
+The HTML is used to immediately show a fast non-interactive initial preview of the Client and Server Components.
+The React Server Components Payload is used to reconcile the Client and rendered Server Component trees, and update the DOM.
+The JavaScript instructions are used to hydrate Client Components and make the application interactive.
+4. Next.js Caching on the Client (Router Cache)
+The React Server Component Payload is stored in the client-side Router Cache - a separate in-memory cache, split by individual route segment. This Router Cache is used to improve the navigation experience by storing previously visited routes and prefetching future routes.
+
+5. Subsequent Navigations
+On subsequent navigations or during prefetching, Next.js will check if the React Server Components Payload is stored in the Router Cache. If so, it will skip sending a new request to the server.
+
+If the route segments are not in the cache, Next.js will fetch the React Server Components Payload from the server, and populate the Router Cache on the client.
+
+Static and Dynamic Rendering
+Whether a route is cached or not at build time depends on whether it's statically or dynamically rendered. Static routes are cached by default, whereas dynamic routes are rendered at request time, and not cached.
+
+This diagram shows the difference between statically and dynamically rendered routes, with cached and uncached data:
+
+How static and dynamic rendering affects the Full Route Cache. Static routes are cached at build time or after data revalidation, whereas dynamic routes are never cached
+Learn more about static and dynamic rendering.
+
+Duration
+By default, the Full Route Cache is persistent. This means that the render output is cached across user requests.
+
+Invalidation
+There are two ways you can invalidate the Full Route Cache:
+
+Revalidating Data: Revalidating the Data Cache, will in turn invalidate the Router Cache by re-rendering components on the server and caching the new render output.
+Redeploying: Unlike the Data Cache, which persists across deployments, the Full Route Cache is cleared on new deployments.
+Opting out
+You can opt out of the Full Route Cache, or in other words, dynamically render components for every incoming request, by:
+
+Using a Dynamic API: This will opt the route out from the Full Route Cache and dynamically render it at request time. The Data Cache can still be used.
+Using the dynamic = 'force-dynamic' or revalidate = 0 route segment config options: This will skip the Full Route Cache and the Data Cache. Meaning components will be rendered and data fetched on every incoming request to the server. The Router Cache will still apply as it's a client-side cache.
+Opting out of the Data Cache: If a route has a fetch request that is not cached, this will opt the route out of the Full Route Cache. The data for the specific fetch request will be fetched for every incoming request. Other fetch requests that do not opt out of caching will still be cached in the Data Cache. This allows for a hybrid of cached and uncached data.
+Client-side Router Cache
+Next.js has an in-memory client-side router cache that stores the RSC payload of route segments, split by layouts, loading states, and pages.
+
+When a user navigates between routes, Next.js caches the visited route segments and prefetches the routes the user is likely to navigate to. This results in instant back/forward navigation, no full-page reload between navigations, and preservation of React state and browser state.
+
+With the Router Cache:
+
+Layouts are cached and reused on navigation (partial rendering).
+Loading states are cached and reused on navigation for instant navigation.
+Pages are not cached by default, but are reused during browser backward and forward navigation. You can enable caching for page segments by using the experimental staleTimes config option.
+Good to know: This cache specifically applies to Next.js and Server Components, and is different to the browser's bfcache, though it has a similar result.
+
+Duration
+The cache is stored in the browser's temporary memory. Two factors determine how long the router cache lasts:
+
+Session: The cache persists across navigation. However, it's cleared on page refresh.
+Automatic Invalidation Period: The cache of layouts and loading states is automatically invalidated after a specific time. The duration depends on how the resource was prefetched, and if the resource was statically generated:
+Default Prefetching (prefetch={null} or unspecified): not cached for dynamic pages, 5 minutes for static pages.
+Full Prefetching (prefetch={true} or router.prefetch): 5 minutes for both static & dynamic pages.
+While a page refresh will clear all cached segments, the automatic invalidation period only affects the individual segment from the time it was prefetched.
+
+Good to know: The experimental staleTimes config option can be used to adjust the automatic invalidation times mentioned above.
+
+Invalidation
+There are two ways you can invalidate the Router Cache:
+
+In a Server Action:
+Revalidating data on-demand by path with (revalidatePath) or by cache tag with (revalidateTag)
+Using cookies.set or cookies.delete invalidates the Router Cache to prevent routes that use cookies from becoming stale (e.g. authentication).
+Calling router.refresh will invalidate the Router Cache and make a new request to the server for the current route.
+Opting out
+As of Next.js 15, page segments are opted out by default.
+
+Good to know: You can also opt out of prefetching by setting the prefetch prop of the <Link> component to false.
+
+Cache Interactions
+When configuring the different caching mechanisms, it's important to understand how they interact with each other:
+
+Data Cache and Full Route Cache
+Revalidating or opting out of the Data Cache will invalidate the Full Route Cache, as the render output depends on data.
+Invalidating or opting out of the Full Route Cache does not affect the Data Cache. You can dynamically render a route that has both cached and uncached data. This is useful when most of your page uses cached data, but you have a few components that rely on data that needs to be fetched at request time. You can dynamically render without worrying about the performance impact of re-fetching all the data.
+Data Cache and Client-side Router cache
+To immediately invalidate the Data Cache and Router cache, you can use revalidatePath or revalidateTag in a Server Action.
+Revalidating the Data Cache in a Route Handler will not immediately invalidate the Router Cache as the Route Handler isn't tied to a specific route. This means Router Cache will continue to serve the previous payload until a hard refresh, or the automatic invalidation period has elapsed.
+APIs
+The following table provides an overview of how different Next.js APIs affect caching:
+
+API	Router Cache	Full Route Cache	Data Cache	React Cache
+<Link prefetch>	Cache			
+router.prefetch	Cache			
+router.refresh	Revalidate			
+fetch			Cache	Cache
+fetch options.cache			Cache or Opt out	
+fetch options.next.revalidate		Revalidate	Revalidate	
+fetch options.next.tags		Cache	Cache	
+revalidateTag	Revalidate (Server Action)	Revalidate	Revalidate	
+revalidatePath	Revalidate (Server Action)	Revalidate	Revalidate	
+const revalidate		Revalidate or Opt out	Revalidate or Opt out	
+const dynamic		Cache or Opt out	Cache or Opt out	
+cookies	Revalidate (Server Action)	Opt out		
+headers, searchParams		Opt out		
+generateStaticParams		Cache		
+React.cache				Cache
+unstable_cache			Cache	
+<Link>
+By default, the <Link> component automatically prefetches routes from the Full Route Cache and adds the React Server Component Payload to the Router Cache.
+
+To disable prefetching, you can set the prefetch prop to false. But this will not skip the cache permanently, the route segment will still be cached client-side when the user visits the route.
+
+Learn more about the <Link> component.
+
+router.prefetch
+The prefetch option of the useRouter hook can be used to manually prefetch a route. This adds the React Server Component Payload to the Router Cache.
+
+See the useRouter hook API reference.
+
+router.refresh
+The refresh option of the useRouter hook can be used to manually refresh a route. This completely clears the Router Cache, and makes a new request to the server for the current route. refresh does not affect the Data or Full Route Cache.
+
+The rendered result will be reconciled on the client while preserving React state and browser state.
+
+See the useRouter hook API reference.
+
+fetch
+Data returned from fetch is not automatically cached in the Data Cache.
+
+The default caching behavior of fetch (e.g., when the cache option is not specified) is equal to setting the cache option to no-store:
+
+
+const data = await fetch('https://api.vercel.app/blog', { cache: 'no-store' })
+See the fetch API Reference for more options.
+
+fetch options.cache
+You can opt individual fetch into caching by setting the cache option to force-cache:
+
+
+// Opt into caching
+fetch(`https://...`, { cache: 'force-cache' })
+See the fetch API Reference for more options.
+
+fetch options.next.revalidate
+You can use the next.revalidate option of fetch to set the revalidation period (in seconds) of an individual fetch request. This will revalidate the Data Cache, which in turn will revalidate the Full Route Cache. Fresh data will be fetched, and components will be re-rendered on the server.
+
+
+// Revalidate at most after 1 hour
+fetch(`https://...`, { next: { revalidate: 3600 } })
+See the fetch API reference for more options.
+
+fetch options.next.tags and revalidateTag
+Next.js has a cache tagging system for fine-grained data caching and revalidation.
+
+When using fetch or unstable_cache, you have the option to tag cache entries with one or more tags.
+Then, you can call revalidateTag to purge the cache entries associated with that tag.
+For example, you can set a tag when fetching data:
+
+
+// Cache data with a tag
+fetch(`https://...`, { next: { tags: ['a', 'b', 'c'] } })
+Then, call revalidateTag with a tag to purge the cache entry:
+
+
+// Revalidate entries with a specific tag
+revalidateTag('a')
+There are two places you can use revalidateTag, depending on what you're trying to achieve:
+
+Route Handlers - to revalidate data in response of a third party event (e.g. webhook). This will not invalidate the Router Cache immediately as the Router Handler isn't tied to a specific route.
+Server Actions - to revalidate data after a user action (e.g. form submission). This will invalidate the Router Cache for the associated route.
+revalidatePath
+revalidatePath allows you manually revalidate data and re-render the route segments below a specific path in a single operation. Calling the revalidatePath method revalidates the Data Cache, which in turn invalidates the Full Route Cache.
+
+
+revalidatePath('/')
+There are two places you can use revalidatePath, depending on what you're trying to achieve:
+
+Route Handlers - to revalidate data in response to a third party event (e.g. webhook).
+Server Actions - to revalidate data after a user interaction (e.g. form submission, clicking a button).
+See the revalidatePath API reference for more information.
+
+revalidatePath vs. router.refresh:
+
+Calling router.refresh will clear the Router cache, and re-render route segments on the server without invalidating the Data Cache or the Full Route Cache.
+
+The difference is that revalidatePath purges the Data Cache and Full Route Cache, whereas router.refresh() does not change the Data Cache and Full Route Cache, as it is a client-side API.
+
+Dynamic APIs
+Dynamic APIs like cookies and headers, and the searchParams prop in Pages depend on runtime incoming request information. Using them will opt a route out of the Full Route Cache, in other words, the route will be dynamically rendered.
+
+cookies
+Using cookies.set or cookies.delete in a Server Action invalidates the Router Cache to prevent routes that use cookies from becoming stale (e.g. to reflect authentication changes).
+
+See the cookies API reference.
+
+Segment Config Options
+The Route Segment Config options can be used to override the route segment defaults or when you're not able to use the fetch API (e.g. database client or 3rd party libraries).
+
+The following Route Segment Config options will opt out of the Full Route Cache:
+
+const dynamic = 'force-dynamic'
+This config option will opt all fetches out of the Data Cache (i.e. no-store):
+
+const fetchCache = 'default-no-store'
+See the fetchCache to see more advanced options.
+
+See the Route Segment Config documentation for more options.
+
+generateStaticParams
+For dynamic segments (e.g. app/blog/[slug]/page.js), paths provided by generateStaticParams are cached in the Full Route Cache at build time. At request time, Next.js will also cache paths that weren't known at build time the first time they're visited.
+
+To statically render all paths at build time, supply the full list of paths to generateStaticParams:
+
+app/blog/[slug]/page.js
+
+export async function generateStaticParams() {
+  const posts = await fetch('https://.../posts').then((res) => res.json())
+ 
+  return posts.map((post) => ({
+    slug: post.slug,
+  }))
+}
+To statically render a subset of paths at build time, and the rest the first time they're visited at runtime, return a partial list of paths:
+
+app/blog/[slug]/page.js
+
+export async function generateStaticParams() {
+  const posts = await fetch('https://.../posts').then((res) => res.json())
+ 
+  // Render the first 10 posts at build time
+  return posts.slice(0, 10).map((post) => ({
+    slug: post.slug,
+  }))
+}
+To statically render all paths the first time they're visited, return an empty array (no paths will be rendered at build time) or utilize export const dynamic = 'force-static':
+
+app/blog/[slug]/page.js
+
+export async function generateStaticParams() {
+  return []
+}
+Good to know: You must return an array from generateStaticParams, even if it's empty. Otherwise, the route will be dynamically rendered.
+
+app/changelog/[slug]/page.js
+
+export const dynamic = 'force-static'
+To disable caching at request time, add the export const dynamicParams = false option in a route segment. When this config option is used, only paths provided by generateStaticParams will be served, and other routes will 404 or match (in the case of catch-all routes).
+
+React cache function
+The React cache function allows you to memoize the return value of a function, allowing you to call the same function multiple times while only executing it once.
+
+Since fetch requests are automatically memoized, you do not need to wrap it in React cache. However, you can use cache to manually memoize data requests for use cases when the fetch API is not suitable. For example, some database clients, CMS clients, or GraphQL clients.
+
+utils/get-item.ts
+TypeScript
+
+TypeScript
+
+import db from '@/lib/db'
+import { cache } from 'react'
+ 
+export const getItem = cache(async (id: string) => {
+  const item = await db.item.findUnique({ id })
+  return item
+})
+
+</nextjs 15 docs>
